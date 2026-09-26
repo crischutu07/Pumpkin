@@ -35,12 +35,12 @@ impl HttpClient {
         // one the rest of the workspace uses) before any client is constructed.
         let _ = rustls::crypto::ring::default_provider().install_default();
         let builder = reqwest::blocking::Client::builder().user_agent(user_agent);
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_env = "musl"))]
         let builder = {
             let certs = webpki_root_certs::TLS_SERVER_ROOT_CERTS
                 .iter()
                 .filter_map(|c| reqwest::Certificate::from_der(c.as_ref()).ok());
-            builder.tls_certs_only(certs)
+            certs.fold(builder, |builder, cert| builder.add_root_certificate(cert))
         };
         let client = builder.build().unwrap_or_default();
         Self { client }
