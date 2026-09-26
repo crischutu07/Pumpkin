@@ -206,49 +206,8 @@ jobs:
           emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: cargo ndk-test -t arm64-v8a
 
-  build_pull_request:
-    name: Build affected packages
-    needs: [prepare, test]
-    if: >-
-      !cancelled() &&
-      github.event_name == 'pull_request' &&
-      needs.prepare.outputs.has_code == 'true' &&
-      needs.test.result == 'success'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux x64
-            os: ubuntu-latest
-          - name: Linux ARM64
-            os: ubuntu-26.04-arm
-          - name: Windows x64
-            os: windows-latest
-          - name: Windows ARM64
-            os: windows-11-arm
-          - name: macOS
-            os: macos-latest
-    env:
-      CI_AFFECTED_PACKAGES: ${{ needs.prepare.outputs.affected_packages }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - run: rustup update ${{ env.CI_RUST_TOOLCHAIN_VER }} && rustup default ${{ env.CI_RUST_TOOLCHAIN_VER }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: debug-${{ runner.os }}-${{ runner.arch }}
-      - name: Build affected packages
-        run: >-
-          python .github/scripts/ci_packages.py run --
-          cargo build --verbose
-
-  build_android_pull_request:
-    name: Build affected packages for Android AArch64
+  build_android_armv7_pull_request:
+    name: Build affected packages for Android ARMv7 (dynamic)
     needs: [prepare, test, test_android]
     if: >-
       !cancelled() &&
@@ -268,88 +227,55 @@ jobs:
         with:
           python-version: "3.x"
       - run: rustup update ${{ env.CI_RUST_TOOLCHAIN_VER }} && rustup default ${{ env.CI_RUST_TOOLCHAIN_VER }}
-      - run: rustup target add aarch64-linux-android
+      - run: rustup target add armv7-linux-androideabi
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: android-debug-${{ runner.os }}-${{ runner.arch }}
+          shared-key: android-armv7-debug-${{ runner.os }}-${{ runner.arch }}
       - run: cargo install cargo-ndk
       - name: Build affected packages
         env:
           CARGO_NDK_PLATFORM: 24
         run: >-
           python .github/scripts/ci_packages.py run --
-          cargo ndk -t arm64-v8a build --locked
+          cargo ndk -t armeabi-v7a build --locked
 
-  build_release:
-    name: Build project in release
-    needs: [prepare, clippy_release, test, test_android]
-    if: needs.prepare.outputs.run_full == 'true' && github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux x64
-            os: ubuntu-latest
-          - name: Linux ARM64
-            os: ubuntu-26.04-arm
-          - name: Windows x64
-            os: windows-latest
-          - name: Windows ARM64
-            os: windows-11-arm
-          - name: macOS
-            os: macos-latest
+  build_android_arm64_static_pull_request:
+    name: Build affected packages for Android AArch64 (static musl)
+    needs: [prepare, test]
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      needs.prepare.outputs.has_code == 'true' &&
+      needs.test.result == 'success'
+    runs-on: ubuntu-26.04-arm
+    env:
+      CI_AFFECTED_PACKAGES: ${{ needs.prepare.outputs.affected_packages }}
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
       - run: rustup update ${{ env.CI_RUST_TOOLCHAIN_VER }} && rustup default ${{ env.CI_RUST_TOOLCHAIN_VER }}
-      - uses: Swatinem/rust-cache@v2
-      - name: Install musl-tools (Linux only)
-        if: runner.os == 'Linux'
+      - run: rustup target add aarch64-unknown-linux-musl
+      - name: Install musl-tools
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-      - name: Build release
-        shell: bash
-        run: |
-          cargo build --verbose --release
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            if [ "${{ runner.arch }}" == "X64" ]; then
-              TARGET="x86_64-unknown-linux-musl"
-            elif [ "${{ runner.arch }}" == "ARM64" ]; then
-              TARGET="aarch64-unknown-linux-musl"
-            fi
-            rustup target add "$TARGET"
-            cargo build --verbose --release --target "$TARGET"
-          fi
-      - name: Prepare artifacts
-        shell: bash
-        run: |
-          mkdir -p dist
-          EXT=""
-          if [ "${{ runner.os }}" == "Windows" ]; then EXT=".exe"; fi
-          cp "target/release/pumpkin$EXT" "dist/pumpkin-${{ runner.arch }}-${{ runner.os }}$EXT"
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            if [ "${{ runner.arch }}" == "X64" ]; then
-              TARGET="x86_64-unknown-linux-musl"
-            elif [ "${{ runner.arch }}" == "ARM64" ]; then
-              TARGET="aarch64-unknown-linux-musl"
-            fi
-            cp "target/$TARGET/release/pumpkin" "dist/pumpkin-${{ runner.arch }}-${{ runner.os }}-musl"
-          fi
-      - name: Export executable
-        uses: actions/upload-artifact@v7
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: pumpkin-${{ runner.arch }}-${{ runner.os }}
-          compression-level: 9
-          path: dist/pumpkin-*
+          shared-key: android-arm64-static-debug-${{ runner.os }}-${{ runner.arch }}
+      - name: Build affected packages
+        run: >-
+          python .github/scripts/ci_packages.py run --
+          cargo build --target aarch64-unknown-linux-musl
 
-  build_android_release:
-    name: Build project in release for Android AArch64
+  build_android_armv7_release:
+    name: Build project in release for Android ARMv7 (dynamic)
     needs: [prepare, clippy_release, test, test_android]
     if: needs.prepare.outputs.run_full == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -358,7 +284,7 @@ jobs:
         with:
           submodules: recursive
       - run: rustup update ${{ env.CI_RUST_TOOLCHAIN_VER }} && rustup default ${{ env.CI_RUST_TOOLCHAIN_VER }}
-      - run: rustup target add aarch64-linux-android
+      - run: rustup target add armv7-linux-androideabi
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
@@ -367,26 +293,58 @@ jobs:
       - name: Build release with cargo ndk
         env:
           CARGO_NDK_PLATFORM: 24
-        run: cargo ndk -t arm64-v8a build --release --locked
+        run: cargo ndk -t armeabi-v7a build --release --locked
       - name: Prepare artifacts
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/aarch64-linux-android/release/pumpkin" "dist/pumpkin-aarch64-android"
+          cp "target/armv7-linux-androideabi/release/pumpkin" "dist/pumpkin-armv7-android"
       - name: Export executable
         uses: actions/upload-artifact@v7
         with:
-          name: pumpkin-aarch64-android
+          name: pumpkin-armv7-android
           compression-level: 9
-          path: dist/pumpkin-aarch64-android
+          path: dist/pumpkin-armv7-android
+
+  build_android_arm64_static_release:
+    name: Build project in release for Android AArch64 (static musl)
+    needs: [prepare, clippy_release, test]
+    if: needs.prepare.outputs.run_full == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-26.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: rustup update ${{ env.CI_RUST_TOOLCHAIN_VER }} && rustup default ${{ env.CI_RUST_TOOLCHAIN_VER }}
+      - run: rustup target add aarch64-unknown-linux-musl
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release (static)
+        run: cargo build --release --target aarch64-unknown-linux-musl
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/aarch64-unknown-linux-musl/release/pumpkin" "dist/pumpkin-aarch64-android-static"
+      - name: Export executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-aarch64-android-static
+          compression-level: 9
+          path: dist/pumpkin-aarch64-android-static
 
   draft_release:
     name: Draft nightly release
     permissions:
       contents: write
-    needs: [build_release, build_android_release]
+    needs: [build_android_armv7_release, build_android_arm64_static_release]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v7
         with:
