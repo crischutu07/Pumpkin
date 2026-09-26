@@ -2,20 +2,21 @@
 
 /// Creates a `reqwest::ClientBuilder` configured with appropriate root certificates.
 ///
-/// On Android, where the default `rustls-platform-verifier` assumes an Android app runtime (JVM/JNI)
-/// and panics when running as a standalone binary (e.g. in Termux), this configures the builder
-/// with Mozilla root certificates from `webpki-root-certs`.
+/// On Android and musl-based standalone binaries, the platform verifier may not have
+/// any usable system trust store available, which can lead to errors such as
+/// `No CA certificates were loaded from the system`. In those environments, fall back
+/// to the Mozilla root certificates bundled by `webpki-root-certs`.
 pub fn client_builder() -> reqwest::ClientBuilder {
     // reqwest is built with `rustls-no-provider`; install the ring provider (the
     // one the rest of the workspace uses) before any client is constructed.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let builder = reqwest::Client::builder();
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_env = "musl"))]
     let builder = {
         let certs = webpki_root_certs::TLS_SERVER_ROOT_CERTS
             .iter()
             .filter_map(|c| reqwest::Certificate::from_der(c.as_ref()).ok());
-        builder.tls_certs_only(certs)
+        certs.fold(builder, |builder, cert| builder.add_root_certificate(cert))
     };
     builder
 }
