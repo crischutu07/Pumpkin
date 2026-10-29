@@ -1,4 +1,4 @@
-name: Build Android (aarch64)
+name: Build Android and static (armv7, 32-bit)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ env:
 
 jobs:
   build_android:
-    name: Build pumpkin-aarch64-android
+    name: Build pumpkin-armv7-android (dynamic, Bionic)
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -23,24 +23,57 @@ jobs:
         with:
           submodules: recursive
       - run: rustup update stable && rustup default stable
-      - run: rustup target add aarch64-linux-android
+      - run: rustup target add armv7-linux-androideabi
       - uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
       - uses: Swatinem/rust-cache@v2
         with:
-          key: android
+          key: android-armv7
       - run: cargo install cargo-ndk
       - name: Build release with cargo ndk
         env:
           CARGO_NDK_PLATFORM: 24
-        run: cargo ndk -t arm64-v8a build --release --locked
+        run: cargo ndk -t armeabi-v7a build --release --locked
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp target/aarch64-linux-android/release/pumpkin dist/pumpkin-aarch64-android
+          cp target/armv7-linux-androideabi/release/pumpkin dist/pumpkin-armv7-android
       - uses: actions/upload-artifact@v7
         with:
-          name: pumpkin-aarch64-android
+          name: pumpkin-armv7-android
           compression-level: 9
-          path: dist/pumpkin-aarch64-android
+          path: dist/pumpkin-armv7-android
+
+  build_static:
+    name: Build pumpkin-armv7-linux-musl (static)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: rustup update stable && rustup default stable
+      - run: rustup target add armv7-unknown-linux-musleabihf
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-armv7
+      - name: Build release (musl, via cross)
+        run: cross build --release --locked --target armv7-unknown-linux-musleabihf
+      - name: Verify the binary is 32-bit ARM and statically linked
+        run: |
+          file target/armv7-unknown-linux-musleabihf/release/pumpkin | tee /tmp/file.txt
+          grep -q "ARM" /tmp/file.txt
+          grep -q "32-bit" /tmp/file.txt
+          grep -q "statically linked" /tmp/file.txt
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp target/armv7-unknown-linux-musleabihf/release/pumpkin dist/pumpkin-armv7-linux-musl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-armv7-linux-musl
+          compression-level: 9
+          path: dist/pumpkin-armv7-linux-musl
