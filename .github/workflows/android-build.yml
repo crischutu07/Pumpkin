@@ -1,0 +1,46 @@
+name: Build Android (aarch64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  build_android:
+    name: Build pumpkin-aarch64-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - run: rustup update stable && rustup default stable
+      - run: rustup target add aarch64-linux-android
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - run: cargo install cargo-ndk
+      - name: Build release with cargo ndk
+        env:
+          CARGO_NDK_PLATFORM: 24
+        run: cargo ndk -t arm64-v8a build --release --locked
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp target/aarch64-linux-android/release/pumpkin dist/pumpkin-aarch64-android
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pumpkin-aarch64-android
+          compression-level: 9
+          path: dist/pumpkin-aarch64-android
